@@ -1,0 +1,122 @@
+High level Design :
+-------------------
+
+struct file_cache;
+-----------------
+
+The above structure holds various key information about the cache (some of the obvious information are not explained). 
+
+            - max_entries : meximum files possible
+
+            - evict_time  : threshold for eviction. On reaching this or beyond this time, we decide it's ok to commit since it has stayed for 
+                            quite sometime before it was last accessed.
+
+            - water_mark  : when the number of free files in the cache go below this watermark, we consider it a good time to start the 
+                            background thread to start eviction
+
+            - pinned_dirty, pinned_clean, unpinned_dirty, unpinned_clean, freeq : these are LRU queues which are holding respective kind of 
+                            file entries 
+
+            - conditional variable cv: this is required for blocking the thread during pinning due to non-availability of free files
+
+            - num_files_pinned_dirty/pinned_clean/unpinned_dirty/unpinned_clean: account of various files. This is required so that we don't 
+                            have to go through the queue everytime to get these stats. These are readily available. These stats are useful 
+                            during pinning, eviction
+
+            - file_cache_table : This has the pointer to the whole table of file_cache_entries (note: files are not allocated prematurely but
+                                 only the entries are. This is done so that we don't unnecessarilty lock up the files. Map the 10kb buf only 
+                                 when required)
+
+            - next_file_cache : If the application allocated multiple cache. This was written keeping that in mind. However due to time 
+                                constraints I couldn't implement the whole functionality
+
+struct file_cache_entry;
+-----------------------
+
+The above structure holds various key information about every file_cache_entry in the cache.
+
+            - rwlock : read write lock is required so that many readers could access the file at the same time. However no readers can access
+                       it when it is being written
+
+            - pinned_clean/pinned_dirty/unpinned_clean/unpinned_dirty: these are the flags that are set to determine the state of the file 
+              cache entry   
+
+            - is_buffer_allocated : This says if the buffer is already allocated or it should be mapped from the free pool
+ 
+            - alloc_data_header : Every 10kb buffer has a header, this pointer points to this header. We will see further what header contains
+ 
+            - alloc_data : This is a pointer to the allocated data itself
+
+            - pinned_count : Number of pins that exist on every entry. This is required during unpinning and eviction. Only when the pinned 
+                             count is 0 we unpin it.
+
+            - last_accessed : This gives the timestamp of when the buffer was last accessed
+
+            - pinned_dirty_next/pinned_clean_next/unpinned_dirty_next/unpinned_clean_next/free_file_next : This contains the next pointer to 
+              the appropriate queue. Only one of them will have a non NULL value.
+
+            - file_cache_back_ptr : This is the pointer back to the cache itself, so that stats in the cache can be updated from here.
+
+struct file_data;
+-----------------
+
+This structure contains the information about the file data.
+
+            - file_data_head_info : which has "used" flag to indicate if it resides in the free pool or in the cache. "next_free" pointer to 
+                                    the next buffer in the pool (if it's still not used). "file_entry_ptr" pointer to the file file_entry to
+                                    which it belongs if it belongs. "file_cache_ptr" pointer to cache that it belongs to if it belongs to a
+                                    cache
+
+            - data : 10kb buffer.
+            - magic: to detect buffer overflow.
+
+struct free_pool_data;
+---------------------
+    
+This basically contains the stats of the free pool data. It is our assumption that all the files are allocated from this free pool only.
+
+            - num_free_files : this gives the number of free files in the pool. If the number of free files go down in the pool, eviction 
+                               should be performed. (this criteria wasn't taken care as an evictio criteria, but intended to implement) 
+
+            - head/tail : contains the head and the tail pointer information for the queue of free pool data.
+
+Please refer the end of "file_cache_def.h" to see the whole picture of the above.
+
+Comments in the files are quite detailed that can explain the functions thoroughly. 
+
+Following files are written:
+----------------------------
+
+file_cache_def.h
+file_cache_decl.h
+
+file_cache_pin.c
+file_cache_unpin.c
+file_cache_evict.c
+file_cache_free_pool_init.c
+file_cache_init.c
+file_cache_read_write.c
+file_cache_destroy.c
+main.c
+stub.c
+
+How to run the code:
+--------------------
+
+just run : ./run_script.sh
+
+For now, all the files are compiling but is not tested since some of the function definitions are missing (the queue_insert/remove) which weren't implemented due to time constraints and thanks to my mid-term week.
+
+future work/recommendations:
+----------------------------
+
+Had I had more time I would have done the following:
+
+         - complete implementing some of the stubs mentioned in stub.c. Could have used glibc library, but it's not very reliable
+         - Write test cases 
+         - Test the code thoroughly
+         - I have written asserts in some places. But I can have the messages logged in the file for debug purpose
+         - Implement priority queue based on the priority of reads and writes thaat come in. However that information was not given.
+                - Priority queues will help further in eviction
+                
+         
